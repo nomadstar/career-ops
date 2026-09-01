@@ -494,6 +494,27 @@ export async function fillSession(
             else gaveUp = true;
           });
         });
+      } else if (meta.richText) {
+        // Playwright supports fill() on most contenteditable controls. Trix is
+        // stricter on some versions, so fall back to its editor API and emit an
+        // input event for frameworks listening outside Trix.
+        await loc.fill(value).catch(async () => {
+          await loc.evaluate((el, text) => {
+            const editor = (el as HTMLElement & { editor?: { loadHTML: (html: string) => void } }).editor;
+            if (editor?.loadHTML) {
+              const escaped = text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/\n/g, "<br>");
+              editor.loadHTML(escaped);
+            } else {
+              el.textContent = text;
+            }
+            el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          }, value);
+        });
       } else {
         await loc.fill(value);
       }

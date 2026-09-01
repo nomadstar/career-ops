@@ -13,7 +13,7 @@ import type { ApplyField } from "./extract";
 // the LLM interprets, never blind-clicks. Robust to any markup change.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Cand = { n: number; tag: string; type: string; name: string; placeholder: string; aria: string; req: boolean; ctx: string; opts: string[] };
+type Cand = { n: number; tag: string; type: string; name: string; placeholder: string; aria: string; req: boolean; ctx: string; opts: string[]; richText: boolean };
 
 /** Tag + capture every interactive control in the frame as a browser_snapshot-style
  *  text list the LLM can reason over. Radio groups collapse to one candidate. */
@@ -46,14 +46,14 @@ async function captureCandidates(frame: Frame): Promise<Cand[]> {
         const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(rname)}"]`));
         const opts = group.map((r) => clean((document.querySelector(`label[for="${CSS.escape((r as HTMLElement).id)}"]`)?.textContent) || r.closest("label")?.textContent || (r as HTMLInputElement).value)).filter(Boolean);
         group.forEach((r) => r.setAttribute("data-co-cand", String(n)));
-        cands.push({ n, tag: "radiogroup", type: "radio", name: rname || "", placeholder, aria, req, ctx, opts });
+        cands.push({ n, tag: "radiogroup", type: "radio", name: rname || "", placeholder, aria, req, ctx, opts, richText: false });
         n++;
         continue;
       }
       el.setAttribute("data-co-cand", String(n));
       let opts: string[] = [];
       if (tag === "select") opts = Array.from((el as HTMLSelectElement).options).map((o) => clean(o.textContent)).filter((o) => o && !/^(select|choose|--)/i.test(o));
-      cands.push({ n, tag, type: itype || role || tag, name, placeholder, aria, req, ctx, opts });
+      cands.push({ n, tag, type: itype || role || tag, name, placeholder, aria, req, ctx, opts, richText: tag === "trix-editor" || el.getAttribute("contenteditable") === "true" });
       n++;
     }
     return cands;
@@ -135,7 +135,7 @@ export async function agentInterpretForm(frame: Frame, cliId: string, title: str
       const fid = `co${fields.length}`;
       const cand = byN.get(p.n)!;
       const options = (p.options && p.options.length ? p.options : cand.opts).map((s) => s.trim()).filter(Boolean);
-      fields.push({ id: fid, type, label: (p.label || cand.ctx || "").slice(0, 160), required: !!p.required || cand.req, options: options.length ? options : undefined, combobox: type === "select" && cand.tag !== "select" });
+      fields.push({ id: fid, type, label: (p.label || cand.ctx || "").slice(0, 160), required: !!p.required || cand.req, options: options.length ? options : undefined, combobox: type === "select" && cand.tag !== "select", richText: cand.richText });
       tagMap.push({ candN: p.n, fid, type, options });
     });
   if (!fields.length) return [];

@@ -17,6 +17,7 @@
 
 import { chromium } from 'playwright';
 import { readFile } from 'fs/promises';
+import { execFileSync } from 'child_process';
 import {
   checkUrlLivenessWithFallback,
   createHeadedPageProvider,
@@ -24,6 +25,7 @@ import {
   jitteredDelayMs,
   sleep,
 } from './liveness-browser.mjs';
+import { classifyLiveness } from './liveness-core.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 
 const USAGE = `Usage:
@@ -31,6 +33,56 @@ const USAGE = `Usage:
   node check-liveness.mjs [--no-fallback] [--throttle[=ms]] --file urls.txt
   node check-liveness.mjs --help                  # print this usage block and exit
   node check-liveness.mjs -h                      # alias for --help`;
+
+function hasCamoufox() {
+  try {
+    execFileSync('camoufox-browser', ['status'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function checkViaCamoufox(url) {
+  try {
+    execFileSync('camoufox-browser', ['open', url], { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] });
+    const js = `() => {
+      const raw = document.body?.innerText || "";
+      const title = document.title || "";
+      const finalUrl = location.href;
+      const candidates = Array.from(
+        document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
+      );
+      const applyControls = candidates
+        .filter((el) => {
+          if (el.closest('nav, header, footer')) return false;
+          if (el.closest('[aria-hidden="true"]')) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden') return false;
+          const rects = el.getClientRects();
+          return rects.length > 0 && Array.from(rects).some((r) => r.width > 0 && r.height > 0);
+        })
+        .map((el) => (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim())
+        .filter(Boolean);
+      return JSON.stringify({ title, finalUrl, bodyText: raw, applyControls });
+    }`;
+    const rawOut = execFileSync('camoufox-browser', ['evaluate', js], { timeout: 15000, encoding: 'utf-8' });
+    const data = JSON.parse(rawOut);
+    return classifyLiveness({
+      status: 200,
+      requestedUrl: url,
+      finalUrl: data.finalUrl || url,
+      bodyText: data.bodyText || '',
+      applyControls: data.applyControls || []
+    });
+  } catch (err) {
+    return {
+      result: 'uncertain',
+      code: 'navigation_error',
+      reason: `camoufox error: ${err.message.split('\n')[0]}`
+    };
+  }
+}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -71,14 +123,23 @@ async function main() {
   ].filter(Boolean);
   console.log(`Checking ${urls.length} URL(s)...${notes.length ? ` (${notes.join(', ')})` : ''}\n`);
 
+  const useCamoufox = hasCamoufox();
+
   // Lazy browser: the API rung resolves ATS postings with no browser at all, so we
-  // only launch Playwright if a URL actually needs the fallback.
+  // only launch Playwright / Camoufox if a URL actually needs the fallback.
   let browser = null, page = null, headed = null;
   async function ensureBrowser() {
+    if (useCamoufox) return;
     if (browser) return;
-    browser = await chromium.launch({ headless: true });
-    page = await newLivenessPage(browser);
-    headed = noFallback ? null : createHeadedPageProvider(chromium);
+    try {
+      browser = await chromium.launch({ headless: true });
+      page = await newLivenessPage(browser);
+      headed = noFallback ? null : createHeadedPageProvider(chromium);
+    } catch (err) {
+      // If Playwright Chromium is missing, check if Camoufox can be used
+      if (hasCamoufox()) return;
+      throw err;
+    }
   }
 
   let active = 0, expired = 0, uncertain = 0, viaApi = 0;
@@ -93,8 +154,13 @@ async function main() {
     if (api) {
       ({ result, reason } = api);
       viaApi++;
+    } else if (useCamoufox) {
+      // Rung 2a: Camoufox browser (visible, anti-detect)
+      const res = checkViaCamoufox(url);
+      ({ result, reason } = res);
+      usedBrowser = true;
     } else {
-      // Rung 2: Playwright — handles non-ATS pages and inconclusive API results.
+      // Rung 2b: Playwright — handles non-ATS pages and inconclusive API results.
       await ensureBrowser();
       const getHeadedPage = headed ? () => headed.get() : undefined;
       ({ result, reason } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage }));

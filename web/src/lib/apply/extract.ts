@@ -9,6 +9,7 @@ export type ApplyField = {
   maxLength?: number;
   value?: string;
   combobox?: boolean; // react-select-style widget → fill via click+type+Enter, not selectOption
+  richText?: boolean; // contenteditable/Trix-style editor rendered as a textarea in our proxy
   nativeId?: string; // the live element's id/name — used to match ATS API schemas (Greenhouse)
   nativeName?: string;
 };
@@ -117,7 +118,10 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
 
     const fields: Array<Record<string, unknown>> = [];
     const seenRadio = new Set<string>();
-    const els = Array.from(document.querySelectorAll("input, textarea, select"));
+    // Get on Board and similar portals use Trix/contenteditable editors for
+    // experience and education. They are real application fields even though
+    // they are not input/textarea elements.
+    const els = Array.from(document.querySelectorAll('input, textarea, select, trix-editor, [contenteditable="true"][role="textbox"], [contenteditable="true"]'));
     let n = 0;
 
     for (const el of els) {
@@ -140,6 +144,22 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       const nativeId = (el as HTMLElement).id || undefined;
       const nativeName = (el as HTMLInputElement).name || undefined;
       const fid = `co${n++}`;
+
+      if (tag === "trix-editor" || el.getAttribute("contenteditable") === "true") {
+        el.setAttribute("data-co-field", fid);
+        fields.push({
+          id: fid,
+          type: "textarea",
+          richText: true,
+          label: clean(labelFor(el)),
+          required,
+          maxLength: undefined,
+          value: clean((el as HTMLElement).innerText),
+          nativeId,
+          nativeName,
+        });
+        continue;
+      }
 
       if (isCombobox) {
         el.setAttribute("data-co-field", fid);

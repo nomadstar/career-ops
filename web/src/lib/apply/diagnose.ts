@@ -211,7 +211,7 @@ export async function multiStepInfo(page: Page): Promise<ApplyIssue | null> {
  *  still empty? any validation error visible? — the self-verification a blind
  *  selector script can't do. Returns warnings to show BEFORE the human submits. */
 export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Record<string, string>): Promise<ApplyIssue[]> {
-  const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox }));
+  const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox, richText: !!f.richText }));
   type R = { mismatches: string[]; requiredEmpty: string[]; valErrors: string[] };
   const res = await frame
     .evaluate(
@@ -249,6 +249,8 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             if (svText) actual = svText; // a value is shown
             else if (ph && (ph as HTMLElement).offsetParent !== null) actual = ""; // placeholder visible → empty
             else actual = intended || "ok"; // can't read reliably → don't flag
+          } else if (f.richText) {
+            actual = el.innerText || el.textContent || "";
           } else {
             actual = (el as HTMLInputElement).value || "";
           }

@@ -192,21 +192,19 @@ function checkTrackedBakFiles(root) {
 }
 
 async function checkPlaywright() {
+  if (hasCamoufox()) {
+    return { pass: true, label: 'Browser engine: camoufox-browser (installed and running)' };
+  }
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
   } catch {
     return {
       pass: false,
-      label: 'Playwright chromium not installed',
-      fix: 'Run: npx playwright install chromium',
+      label: 'Browser engine not installed',
+      fix: 'Install camoufox-browser or run: npx playwright install chromium',
     };
   }
-  // Validate by launching — chromium.executablePath() points at Chrome for Testing
-  // (full binary) but chromium.launch() may use the headless-shell binary, which
-  // lives at a different path and requires a separate install. Launching directly
-  // tests the exact binary the runtime uses and catches stub-installs (directory
-  // present but no binary — just ABOUT + LICENSE files).
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
@@ -214,8 +212,8 @@ async function checkPlaywright() {
   } catch {
     return {
       pass: false,
-      label: 'Playwright chromium not installed',
-      fix: 'Run: npx playwright install chromium',
+      label: 'Browser engine not installed',
+      fix: 'Install camoufox-browser or run: npx playwright install chromium',
     };
   } finally {
     try { await browser?.close(); } catch { /* ignore */ }
@@ -347,7 +345,20 @@ function resolveActiveCli() {
   return { cli: 'claude', source: 'default' };
 }
 
+function hasCamoufox() {
+  try {
+    execFileSync('camoufox-browser', ['status'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function checkPlaywrightMcp(root, activeCli) {
+  if (hasCamoufox()) {
+    return { pass: true, label: 'Browser automation: camoufox-browser ready (anti-detect, visible)' };
+  }
+
   // Unknown CLI (typo / not in VALID_CLIS).
   if (activeCli === 'unknown') return null;
 

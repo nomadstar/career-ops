@@ -45,6 +45,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 import * as yaml from 'js-yaml';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -455,6 +456,53 @@ async function main() {
         emitJd(workdayResult, maxChars);
         return;
       }
+    }
+  }
+
+function hasCamoufox() {
+  try {
+    execFileSync('camoufox-browser', ['status'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+  if (hasCamoufox()) {
+    try {
+      execFileSync('camoufox-browser', ['open', url], { timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+      const js = `() => {
+        const title = (document.querySelector('h1')?.innerText || document.title || '').trim();
+        const root = document.querySelector('main, [role="main"], article') || document.body;
+        let text = '';
+        if (root) {
+          const clone = root.cloneNode(true);
+          clone.querySelectorAll('script, style, nav, header, footer, noscript').forEach((el) => el.remove());
+          text = clone.innerText || '';
+        }
+        const anchors = Array.from(document.querySelectorAll('a[href]'))
+          .filter((el) => {
+            if (el.closest('nav, header, footer')) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            return el.getClientRects().length > 0;
+          })
+          .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim() }));
+        return JSON.stringify({ title, text, anchors, finalUrl: location.href });
+      }`;
+      const rawOut = execFileSync('camoufox-browser', ['evaluate', js], { timeout: 15000, encoding: 'utf-8' });
+      const raw = JSON.parse(rawOut);
+      const finalUrl = raw.finalUrl || url;
+      if (mode === 'listing') {
+        process.stdout.write(JSON.stringify(normalizeListing(raw.anchors, finalUrl, max)));
+      } else {
+        emitJd(normalizeJd(raw, finalUrl, maxChars), maxChars);
+      }
+      return;
+    } catch (err) {
+      console.error(JSON.stringify({ error: `camoufox error: ${String(err.message).split('\n')[0]}`, code: 'navigation_error' }));
+      process.exitCode = 1;
+      return;
     }
   }
 
