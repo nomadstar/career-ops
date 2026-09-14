@@ -96,8 +96,10 @@ classify_js='() => {
       "ya no acepta solicitudes", "no longer accepting applications",
       "job is no longer available", "position has been filled", "oferta finalizada",
       "esta oferta ya no", "no encontramos la página que buscas",
-      "the page you were looking for doesn’t exist", "the page you were looking for doesn\u0027t exist"
-    )
+      "the page you were looking for doesn’t exist", "the page you were looking for doesn\u0027t exist",
+      "404. we really tried", "404 not found", "página no encontrada", "page not found"
+    ) ||
+    (host.includes("weworkremotely.com") && (location.pathname === "/" || has("41,994 jobs posted", "the largest job board for remote jobs")))
   ) {
     status = "expired";
     evidence = "Explicit expired/unavailable marker";
@@ -109,9 +111,15 @@ classify_js='() => {
       status = "active";
       evidence = "Freelancer bidding control is visible";
     }
-  } else if (has("solicitar", "apply now", "postular", "postula ahora", "postularme", "enviar candidatura")) {
+  } else if (
+    has(
+      "solicitar", "solicitud sencilla", "solicitud fácil", "easy apply",
+      "apply now", "postular", "postula ahora", "postularme", "enviar candidatura"
+    ) ||
+    (host.includes("torre.ai") && has("match y ranking", "responsabilidades", "inicia sesión para descubrir tu match"))
+  ) {
     status = "active";
-    evidence = "Apply/Postular control is visible";
+    evidence = "Apply/Postular/Torre control is visible";
   }
 
   return { status, evidence, title, final_url: location.href };
@@ -175,7 +183,7 @@ run_checks() {
       continue
     fi
 
-    open_text="$($camoufox_bin open "$url" 2>&1)" || {
+    open_text="$(timeout 20 "$camoufox_bin" open "$url" 2>&1)" || {
       emit "$page_id" "$url" "${label:-}" '' "$open_text"
       continue
     }
